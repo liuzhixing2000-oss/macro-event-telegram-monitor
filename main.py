@@ -79,12 +79,25 @@ def important(e):
 
 def fmt(v): return "N/A" if v in (None,"") else str(v)
 
-def bias(e):
+def numeric(v):
+    if v in (None,""): return None
+    import re
+    m=re.search(r"-?\\d+(?:,\\d{3})*(?:\\.\\d+)?",str(v))
+    return float(m.group(0).replace(",","")) if m else None
+
+def deviation(e):
     a,b=e.get("Actual"),e.get("Forecast")
-    try:
-        da=float(a); db=float(b)
-        return "高于预期：通常偏鹰派，短线可能利空BTC/ETH、利多美元/收益率（具体取决于指标）" if da>db else "低于预期：通常偏鸽派，短线可能利多BTC/ETH、利空美元/收益率（具体取决于指标）" if da<db else "符合预期：通常为中性"
-    except: return "暂无法判断，需结合指标性质和市场即时反应"
+    da,db=numeric(a),numeric(b)
+    if da is None or db is None:
+        return "无法计算数值差（实际值或预期值缺失/格式不支持）"
+    diff=da-db
+    if diff==0:
+        return "符合预期（差值 0）｜初步：中性"
+    direction="高于预期" if diff>0 else "低于预期"
+    # This is a generic macro interpretation; the indicator's nature matters.
+    market="通常偏鹰派，短线可能利空 BTC/ETH、利多美元/收益率" if diff>0 else "通常偏鸽派，短线可能利多 BTC/ETH、利空美元/收益率"
+    return f"{direction}（数值差 {diff:+g}）｜初步：{market}；需结合指标性质确认"
+
 
 def weekly():
     now=datetime.now(TZ); end=now+timedelta(days=7)
