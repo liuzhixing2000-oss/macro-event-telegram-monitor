@@ -21,9 +21,28 @@ def send(text):
     r.raise_for_status()
 
 def get_calendar(start,end):
-    url=f"https://api.tradingeconomics.com/calendar/country/United States/{start:%Y-%m-%d}/{end:%Y-%m-%d}?c={TE_KEY}"
-    r=requests.get(url,timeout=30); r.raise_for_status()
-    return r.json() if isinstance(r.json(),list) else []
+    # The dated guest endpoint now returns 410. Use the supported country
+    # snapshot endpoint for guest access; paid keys may still use date filters.
+    base="https://api.tradingeconomics.com/calendar/country/United%20States"
+    urls=[f"{base}?c={TE_KEY}"]
+    if TE_KEY != "guest:guest":
+        urls.insert(0,f"{base}/{start:%Y-%m-%d}/{end:%Y-%m-%d}?c={TE_KEY}")
+    last=None
+    for url in urls:
+        try:
+            r=requests.get(url,timeout=30)
+            if r.status_code == 410:
+                last=r
+                continue
+            r.raise_for_status()
+            data=r.json()
+            return data if isinstance(data,list) else []
+        except requests.RequestException:
+            last=r if 'r' in locals() else None
+            continue
+    if last is not None:
+        last.raise_for_status()
+    return []
 
 def event_time(e):
     raw=e.get("Date") or e.get("date")
@@ -43,7 +62,6 @@ def bias(e):
     a,b=e.get("Actual"),e.get("Forecast")
     try:
         da=float(a); db=float(b)
-        # Generic interpretation is deliberately qualified; direction depends on the release.
         return "高于预期：通常偏鹰派，短线可能利空BTC/ETH、利多美元/收益率（具体取决于指标）" if da>db else "低于预期：通常偏鸽派，短线可能利多BTC/ETH、利空美元/收益率（具体取决于指标）" if da<db else "符合预期：通常为中性"
     except: return "暂无法判断，需结合指标性质和市场即时反应"
 
@@ -60,8 +78,7 @@ def check():
     now=datetime.now(TZ); ev=get_calendar(now-timedelta(hours=2),now+timedelta(hours=1))
     for e in ev:
         if not important(e): continue
-        t=event_time(e)
-        actual=e.get("Actual")
+        t=event_time(e); actual=e.get("Actual")
         if not t or t>now or actual in (None,""): continue
         eid=str(e.get("CalendarId") or e.get("ID") or f"{e.get('Event')}-{t.isoformat()}")
         if db.execute("SELECT 1 FROM sent WHERE event_id=?",(eid,)).fetchone(): continue
