@@ -40,9 +40,30 @@ def get_calendar(start,end):
         except requests.RequestException:
             last=r if 'r' in locals() else None
             continue
-    if last is not None:
-        last.raise_for_status()
-    return []
+    # Public fallback used when TradingEconomics guest access is unavailable.
+    try:
+        r=requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",timeout=30)
+        r.raise_for_status()
+        out=[]
+        for e in r.json():
+            country=str(e.get("country",""))
+            impact=str(e.get("impact","")).lower()
+            if country in ("USD","US") and impact in ("high","3"):
+                out.append({
+                    "CalendarId": f"ff-{e.get('date')}-{e.get('title')}",
+                    "Date": e.get("date"),
+                    "Country": "United States",
+                    "Event": e.get("title"),
+                    "Actual": e.get("actual"),
+                    "Forecast": e.get("forecast"),
+                    "Previous": e.get("previous"),
+                    "Importance": 3,
+                })
+        return out
+    except requests.RequestException:
+        if last is not None:
+            print("calendar sources unavailable",repr(last),flush=True)
+        return []
 
 def event_time(e):
     raw=e.get("Date") or e.get("date")
