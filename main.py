@@ -110,11 +110,33 @@ def check():
         send(msg); db.execute("INSERT INTO sent VALUES (?,?)",(eid,now.isoformat())); db.commit()
 
 last_weekly=None
+calendar_cache=[]
+cache_until=datetime.min.replace(tzinfo=TZ)
+
 while True:
     now=datetime.now(TZ)
     if now.weekday()==6 and now.hour==19 and now.minute<2 and last_weekly!=now.date():
         try: weekly(); last_weekly=now.date()
         except Exception as ex: print("weekly error",repr(ex),flush=True)
-    try: check()
-    except Exception as ex: print("poll error",repr(ex),flush=True)
-    time.sleep(POLL)
+
+    # Refresh the schedule periodically, but only poll every minute near a release.
+    if now >= cache_until:
+        try:
+            calendar_cache=get_calendar(now,now+timedelta(days=7))
+            cache_until=now+timedelta(hours=6)
+        except Exception as ex:
+            print("schedule refresh error",repr(ex),flush=True)
+            cache_until=now+timedelta(minutes=15)
+
+    near_event=any(
+        important(e) and event_time(e) and
+        now-timedelta(hours=2) <= event_time(e) <= now+timedelta(minutes=15)
+        for e in calendar_cache
+    )
+    if near_event:
+        try: check()
+        except Exception as ex: print("poll error",repr(ex),flush=True)
+        time.sleep(POLL)
+    else:
+        # No event is due soon: reduce API calls to at most four per hour.
+        time.sleep(900)
