@@ -21,7 +21,10 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 POLL_SECONDS = max(30, int(os.getenv("POLL_SECONDS", "60")))
 NEWS_POLL_SECONDS = max(180, int(os.getenv("NEWS_POLL_SECONDS", "300")))
 TE_KEY = os.getenv("TRADINGECONOMICS_KEY", "guest:guest")
-USER_AGENT = "macro-event-telegram-monitor/2.0"
+USER_AGENT = (
+    "Mozilla/5.0 (compatible; macro-event-telegram-monitor/2.1; "
+    "+https://github.com/liuzhixing2000-oss/macro-event-telegram-monitor)"
+)
 
 MAJOR_FF_COUNTRIES = {"USD", "EUR", "GBP", "JPY", "CNY", "AUD", "CAD", "CHF"}
 NON_US_KEYWORDS = (
@@ -40,16 +43,15 @@ WATCH_TERMS = tuple(
 )
 
 RSS_FEEDS = [
-    ("Federal Reserve", "https://www.federalreserve.gov/feeds/press_all.xml"),
-    ("Fed speeches", "https://www.federalreserve.gov/feeds/speeches.xml"),
     ("SEC", "https://www.sec.gov/news/pressreleases.rss"),
-    ("CFTC", "https://www.cftc.gov/PressRoom/PressReleases/rss"),
 ]
 NEWS_QUERIES = [
     '"CLARITY Act" OR "GENIUS Act" OR (crypto regulation)',
     '(bitcoin OR ethereum OR stablecoin OR "digital asset") (SEC OR CFTC OR Senate OR Congress)',
     '(Federal Reserve OR FOMC OR ECB OR "Bank of England" OR "Bank of Japan") '
     '(rates OR inflation OR monetary policy)',
+    'site:federalreserve.gov (statement OR speech OR press release) (rates OR inflation OR employment)',
+    'site:cftc.gov (crypto OR digital asset OR enforcement OR rule)',
 ]
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -328,7 +330,7 @@ def fetch_news_items():
     items = []
     feeds = list(RSS_FEEDS)
     for query in NEWS_QUERIES:
-        url = "https://news.google.com/rss/search?q=" + quote_plus(query + " when:1d") + "&hl=en-US&gl=US&ceid=US:en"
+        url = "https://www.bing.com/news/search?q=" + quote_plus(query) + "&format=rss&mkt=en-US"
         feeds.append(("News", url))
     for source, url in feeds:
         try:
