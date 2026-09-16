@@ -63,6 +63,13 @@ db.commit()
 session = requests.Session()
 session.headers.update({"User-Agent": USER_AGENT})
 
+# Faireconomy is a public fallback and can return HTTP 429 around major releases.
+# Keep the last good payload and honour a bounded exponential backoff instead of
+# retrying it every minute while it is rate-limited.
+calendar_last_good = []
+calendar_backoff_until = datetime.min.replace(tzinfo=timezone.utc)
+calendar_failure_count = 0
+
 
 def log(message):
     print(f"{datetime.now(timezone.utc).isoformat()} {message}", flush=True)
@@ -124,6 +131,8 @@ def event_time(event):
 
 
 def get_calendar(start, end):
+    global calendar_last_good, calendar_backoff_until, calendar_failure_count
+
     if TE_KEY != "guest:guest":
         url = (
             "https://api.tradingeconomics.com/calendar/country/All/"
@@ -134,16 +143,38 @@ def get_calendar(start, end):
             response.raise_for_status()
             data = response.json()
             if isinstance(data, list) and data:
+                calendar_last_good = data
+                calendar_failure_count = 0
+                calendar_backoff_until = datetime.min.replace(tzinfo=timezone.utc)
                 return data
         except (requests.RequestException, ValueError) as exc:
             log(f"TradingEconomics unavailable: {exc!r}")
 
+    now_utc = datetime.now(timezone.utc)
+    if now_utc < calendar_backoff_until:
+        return list(calendar_last_good)
+
     try:
+        # Do not attach a minute-by-minute cache-buster. The CDN copy is allowed
+        # to refresh normally; bypassing it caused sustained 429s during events.
         response = session.get(
             "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-            params={"_": int(time.time() // 60)},
             timeout=30,
         )
+        if response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            try:
+                retry_seconds = max(300, int(retry_after))
+            except (TypeError, ValueError):
+                retry_seconds = min(3600, 300 * (2 ** min(calendar_failure_count, 3)))
+            calendar_failure_count += 1
+            calendar_backoff_until = now_utc + timedelta(seconds=retry_seconds)
+            log(
+                "calendar rate limited: backing off for "
+                f"{retry_seconds}s; using {len(calendar_last_good)} cached events"
+            )
+            return list(calendar_last_good)
+
         response.raise_for_status()
         output = []
         for item in response.json():
@@ -164,10 +195,19 @@ def get_calendar(start, end):
                 "Previous": item.get("previous"),
                 "Importance": 3,
             })
+        calendar_last_good = output
+        calendar_failure_count = 0
+        calendar_backoff_until = datetime.min.replace(tzinfo=timezone.utc)
         return output
     except (requests.RequestException, ValueError) as exc:
-        log(f"calendar unavailable: {exc!r}")
-        return []
+        calendar_failure_count += 1
+        retry_seconds = min(3600, 300 * (2 ** min(calendar_failure_count - 1, 3)))
+        calendar_backoff_until = now_utc + timedelta(seconds=retry_seconds)
+        log(
+            f"calendar unavailable: {exc!r}; backing off for {retry_seconds}s; "
+            f"using {len(calendar_last_good)} cached events"
+        )
+        return list(calendar_last_good)
 
 
 def important(event):
